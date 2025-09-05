@@ -1,37 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>DNS Checker</title>
+
 <style>
+  /* Use every pixel inside the iframe */
   html, body { background: transparent; margin: 0; padding: 0; }
   body { font-family: Arial, Helvetica, sans-serif; color:#111; }
 
-  /* Desktop table (unchanged) */
-  .table-wrap { width:100%; max-width:100%; margin:0; overflow-x:auto; -webkit-overflow-scrolling:touch; }
+  /* Desktop table (your format) */
+  .table-wrap { width:100%; max-width:100%; margin:0; padding:0; overflow-x:auto; -webkit-overflow-scrolling:touch; }
+  h2 { margin:0 0 8px; text-align:center; font-size:24px; line-height:1.15; word-break:break-word; }
   table { width:100%; border-collapse:collapse; table-layout:fixed; }
   th, td { border:1px solid #000; padding:10px; text-align:center; vertical-align:middle; word-break:break-word; }
   thead th { background:#f6f6f6; }
-  h2 { margin:0 0 8px; text-align:center; }
-  .status { margin:8px 0 0; padding:12px 14px; font-weight:700; color:#fff; text-align:center; border-radius:6px }
-  .ok { background:#16a34a } .bad { background:#dc2626 }
-  .cell-ok { color:#16a34a; font-weight:700 } .cell-bad { color:#dc2626; font-weight:700 }
+  .status { margin:8px 0 0; padding:12px 14px; font-weight:700; color:#fff; text-align:center; border-radius:6px; width:100%; }
+  .ok { background:#16a34a }           /* green */
+  .bad { background:#dc2626 }          /* red */
+  .cell-ok { color:#16a34a; font-weight:700 }
+  .cell-bad { color:#dc2626; font-weight:700 }
+  .hint { margin:8px 0 0; color:#666; font-size:13px; }
 
-  /* Mobile: stack each record into a "card" so the TABLE (not just banner) fits */
+  /* Helpful fixed widths on desktop so columns line up nicely */
+  thead th:nth-child(1) { width:120px; }      /* DNS Record */
+  thead th:nth-child(2), thead th:nth-child(4) { width:120px; } /* Value cols */
+
+  /* Mobile: stack each record into a "card" */
   @media (max-width:560px){
     thead{display:none}
     table, tbody, tr, td{display:block; width:100%}
     tr{border:1px solid #000; border-radius:8px; margin:8px 0; overflow:hidden}
     td{border:none; border-top:1px solid #000; text-align:left; padding:10px 12px; font-size:14px}
-    td:first-child{border-top:none; background:#f6f6f6; font-weight:700} /* DNS Record type row */
-
-    /* Labels for the 4 data cells */
+    td:first-child{border-top:none; background:#f6f6f6; font-weight:700} /* DNS Record (Type) */
+    /* labels for the 4 data cells */
     tr[data-rec] td:nth-child(2)::before{content:"Expected Value"; display:block; color:#666; font-size:12px; margin-bottom:2px}
     tr[data-rec] td:nth-child(3)::before{content:"Expected Data";  display:block; color:#666; font-size:12px; margin-bottom:2px}
     tr[data-rec] td:nth-child(4)::before{content:"Actual Value";   display:block; color:#666; font-size:12px; margin-bottom:2px}
     tr[data-rec] td:nth-child(5)::before{content:"Actual Data";    display:block; color:#666; font-size:12px; margin-bottom:2px}
+    .status { font-size:15px; padding:10px; border-radius:6px }
+    .hint { font-size:12px }
   }
 </style>
+</head>
+<body>
+
+  <div class="table-wrap">
+    <h2 id="title">—</h2>
+
+    <table>
+      <thead>
+        <tr>
+          <th rowspan="2">DNS Record</th>
+          <th colspan="2">Expected</th>
+          <th colspan="2">Actual</th>
+        </tr>
+        <tr>
+          <th>Value</th><th>Data</th>
+          <th>Value</th><th>Data</th>
+        </tr>
+      </thead>
+      <tbody>
+        <!-- A record row -->
+        <tr id="row-a" data-rec="A">
+          <td>A</td>
+          <td>@</td>
+          <td id="expA">—</td>
+          <td>@</td>
+          <td id="actA">—</td>
+        </tr>
+        <!-- CNAME row -->
+        <tr id="row-c" data-rec="CNAME">
+          <td>CNAME</td>
+          <td id="cnameVal">www</td>
+          <td id="expC">—</td>
+          <td id="actCVal">www</td>
+          <td id="actC">—</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div id="status" class="status">Checking…</div>
+    <div id="hint" class="hint"></div>
+  </div>
+
+<script>
+(async () => {
+  const qs = new URLSearchParams(location.search);
+  const domain = (qs.get('domain') || '').trim();
+  const expectedA = (qs.get('expectedA') || '').split(',').map(s => s.trim()).filter(Boolean);
+  const expectedC = (qs.get('expectedC') || '').trim();
+  const cnameHost = (qs.get('cnameHost') || 'www').trim() || 'www';
+
+  const $ = id => document.getElementById(id);
+  $('title').textContent = domain || '—';
+  $('expA').textContent = expectedA.join(', ') || '—';
+  $('expC').textContent = expectedC || '—';
+  $('cnameVal').textContent = cnameHost === '@' ? '@' : cnameHost;
+  $('actCVal').textContent = cnameHost === '@' ? '@' : cnameHost;
+
+  if (!domain || (!expectedA.length && !expectedC)) {
+    setBanner(false, "Missing parameters. Provide domain, expectedA and/or expectedC.");
     $('hint').textContent = "Example: ?domain=example.com&expectedA=93.184.216.34&expectedC=pages.host.com&cnameHost=www";
     return;
   }
 
-  // Cloudflare DNS-over-HTTPS
+  // Cloudflare DNS-over-HTTPS query
   async function doh(name, type) {
     const url = `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(name)}&type=${type}`;
     const r = await fetch(url, { headers: { 'accept': 'application/dns-json' }});
@@ -39,54 +114,52 @@
     const j = await r.json();
     return (j.Answer || []).map(a => a.data);
   }
-  const canon = s => String(s || '').trim().replace(/\.$/,'').toLowerCase();
+  const canon = s => String(s || '').trim().replace(/\.$/, '').toLowerCase();
 
   try {
-    // A (root)
+    // A record (root)
     const aAns = await doh(domain, 'A');
     const liveA = aAns.filter(v => /^\d+\.\d+\.\d+\.\d+$/.test(v));
     $('actA').textContent = liveA.join(', ') || '—';
 
-    // CNAME (selected host)
+    // CNAME (host)
     const fqdn = cnameHost === '@' ? domain : `${cnameHost}.${domain}`;
     const cAns = await doh(fqdn, 'CNAME');
     const liveC = cAns.map(canon);
     $('actC').textContent = liveC.join(', ') || '—';
 
-    // Compare logic
+    // Compare
     const aMatch = expectedA.length ? expectedA.every(ip => liveA.includes(ip)) : null;
     const cMatch = expectedC ? liveC.includes(canon(expectedC)) : null;
 
-    // Cell coloring (like your example):
-    //  - If match: color BOTH expected data and actual data cells green (and actual value cell)
-    //  - If mismatch: color ONLY actual data cell red
+    // Cell coloring per row (like your mock)
     if (aMatch !== null) {
-      if (aMatch) { addOK('expA'); addOK('actA'); }
-      else        { addBAD('actA'); }
+      if (aMatch) { markOK('expA'); markOK('actA'); }
+      else        { markBAD('actA'); }
     }
     if (cMatch !== null) {
-      if (cMatch) { addOK('expC'); addOK('actC'); addOK('actCVal'); }
-      else        { addBAD('actC'); }
+      if (cMatch) { markOK('expC'); markOK('actC'); markOK('actCVal'); }
+      else        { markBAD('actC'); }
     }
 
     const overall = [aMatch, cMatch].filter(v => v !== null).every(Boolean);
     setBanner(overall, overall ? "Your DNS Records are correct" : "Your DNS Records are NOT correct");
 
-    // Hints
+    // Helpful hint text
     const hints = [];
     if (aMatch === false) hints.push(`A mismatch: expected ${expectedA.join(', ')} vs actual ${liveA.join(', ') || '—'}.`);
     if (cMatch === false) hints.push(`CNAME mismatch on ${cnameHost === '@' ? 'root (@)' : cnameHost}: expected ${expectedC} vs actual ${liveC.join(', ') || '—'}.`);
-    $('hint').innerHTML = hints.join(' ');
+    $('hint').textContent = hints.join(' ');
 
   } catch (e) {
     setBanner(false, "Could not fetch DNS records");
     $('hint').textContent = e.message;
   }
 
-  // Helpers
-  function addOK(id){ const el=$(id); el.classList.remove('cell-bad'); el.classList.add('cell-ok'); }
-  function addBAD(id){ const el=$(id); el.classList.remove('cell-ok'); el.classList.add('cell-bad'); }
-  function setBanner(ok, text){ const el=$('status'); el.className='status '+(ok?'ok':'bad'); el.textContent=text; }
+  // helpers
+  function markOK(id){ const el = $(id); if (el) el.classList.add('cell-ok'); }
+  function markBAD(id){ const el = $(id); if (el) el.classList.add('cell-bad'); }
+  function setBanner(ok, text){ const el = $('status'); el.className = 'status ' + (ok ? 'ok' : 'bad'); el.textContent = text; }
 })();
 </script>
 </body>
