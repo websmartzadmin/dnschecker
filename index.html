@@ -12,15 +12,23 @@
       font-family: Arial, sans-serif;
     }
 
-    .viewport { width: 100%; overflow-x: auto; }
+    .viewport {
+      width: 100%;
+      overflow-x: auto;   /* allow scroll if absolutely needed */
+    }
 
-    h2 { margin: 0 0 12px 0; font-size: 18px; font-weight: 700; text-align: center; }
+    h2 {
+      margin: 0 0 12px 0;
+      font-size: 18px;
+      font-weight: 700;
+      text-align: center;
+    }
 
-    /* Table flexes to width of iframe */
+    /* Responsive table */
     table {
       border-collapse: collapse;
-      width: 100%;              /* use full width of iframe */
-      table-layout: auto;       /* let columns shrink/grow as needed */
+      width: 100%;            /* stretch to iframe width */
+      table-layout: auto;     /* let columns adjust */
     }
 
     th, td {
@@ -28,7 +36,7 @@
       padding: 6px;
       text-align: center;
       font-size: 13px;
-      word-break: break-word;   /* prevent long hostnames from overflowing */
+      word-break: break-word; /* wrap long hostnames instead of widening */
     }
 
     thead th {
@@ -83,6 +91,7 @@
   </div>
 
   <script>
+    /* --- URL parameters --- */
     const q = new URLSearchParams(location.search);
     const domain    = (q.get('domain')    || '').trim() || 'example.com';
     const expectedA = (q.get('expectedA') || '').trim() || '93.184.216.34';
@@ -95,6 +104,7 @@
     document.getElementById('cnameHostCell').textContent = cnameHost;
     document.getElementById('actCnameHost').textContent  = cnameHost;
 
+    /* --- Cloudflare DNS over HTTPS --- */
     async function doh(name, type) {
       const url = `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(name)}&type=${type}`;
       const res = await fetch(url, { headers: { accept:'application/dns-json' } });
@@ -106,14 +116,17 @@
     (async function run() {
       const statusEl = document.getElementById('status');
       try {
+        // A record
         const aAns = await doh(domain, 'A');
         const liveA = aAns.find(v => /^\d+\.\d+\.\d+\.\d+$/.test(v)) || 'N/A';
         document.getElementById('actA').textContent = liveA;
 
+        // CNAME record
         const cAns = await doh(`${cnameHost}.${domain}`, 'CNAME');
         const liveC = cAns.length ? cAns[0].replace(/\.$/, '').toLowerCase() : 'N/A';
         document.getElementById('actC').textContent = liveC;
 
+        // Compare
         const ok = (liveA === expectedA) &&
                    (liveC !== 'N/A' && liveC === expectedC.toLowerCase());
         statusEl.textContent = ok ? 'Your DNS Records are correct'
