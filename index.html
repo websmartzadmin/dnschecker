@@ -4,37 +4,35 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>DNS Record Checker</title>
-
   <style>
-    /* Page reset */
-    html, body { margin: 0; padding: 0; background: #fff; font-family: Arial, sans-serif; }
+    /* Reset */
+    html, body { margin:0; padding:0; background:#fff; font-family:Arial, sans-serif; }
 
-    /* Viewport wrapper that we’ll size to the scaled table’s height */
-    .dns-viewport { width: 100%; overflow: hidden; }
+    /* The wrapper we will resize to the scaled content height */
+    .dns-viewport { width:100%; overflow:hidden; }
 
-    /* Root holds the fixed-width (desktop) table; we scale this on mobile */
-    .dns-root { margin: 0; transform-origin: top left; }
+    /* Fixed-width “desktop” block that we scale down on small screens */
+    .dns-root { margin:0; transform-origin: top left; }
 
-    /* Headline */
-    h2 { margin: 0 0 12px 0; font-size: 18px; font-weight: 700; }
+    /* Heading */
+    h2 { margin:0 0 12px 0; font-size:18px; font-weight:700; }
 
-    /* Table styles (desktop layout) */
-    table { border-collapse: collapse; width: 980px; /* natural width, will be measured dynamically too */ }
-    th, td { border: 1px solid #000; padding: 8px; text-align: center; font-size: 14px; }
-    thead th { background: #eee; }
+    /* TABLE — always desktop layout */
+    table { border-collapse: collapse; width: 980px; } /* natural width */
+    th, td { border:1px solid #000; padding:8px; text-align:center; font-size:14px; }
+    thead th { background:#eee; }
 
     /* Status strip */
-    .status { margin-top: 12px; padding: 10px; text-align: center; color: #fff; font-weight: 700; }
-    .status.ok  { background: #00a651; }     /* green */
-    .status.bad { background: #d50000; }     /* red  */
+    .status { margin-top:12px; padding:10px; text-align:center; color:#fff; font-weight:700; }
+    .ok  { background:#00a651; }
+    .bad { background:#d50000; }
   </style>
 </head>
 <body>
-  <div class="dns-viewport">
-    <div class="dns-root">
+  <div class="dns-viewport" id="vp">
+    <div class="dns-root" id="root">
       <h2 id="domain">DNS Record Confirmation</h2>
-
-      <table id="dns-table">
+      <table id="dnsTable">
         <thead>
           <tr>
             <th rowspan="2">DNS Record</th>
@@ -42,10 +40,7 @@
             <th colspan="2">Actual</th>
           </tr>
           <tr>
-            <th>Value</th>
-            <th>Data</th>
-            <th>Value</th>
-            <th>Data</th>
+            <th>Value</th><th>Data</th><th>Value</th><th>Data</th>
           </tr>
         </thead>
         <tbody>
@@ -65,97 +60,94 @@
           </tr>
         </tbody>
       </table>
-
       <div id="status" class="status">Checking DNS…</div>
     </div>
   </div>
 
   <script>
-    /* ---------------- Params ---------------- */
+    /* --------- Read parameters --------- */
     const q = new URLSearchParams(location.search);
-    const domain     = (q.get('domain')     || '').trim() || 'example.com';
-    const expectedA  = (q.get('expectedA')  || '').trim() || '93.184.216.34';
-    const expectedC  = (q.get('expectedC')  || '').trim() || 'example.com';
-    const cnameHost  = (q.get('cnameHost')  || '').trim() || 'www';
-    const forceTable = q.get('desktop') === '1'; // optional flag if you ever need it
+    const domain    = (q.get('domain')    || '').trim() || 'example.com';
+    const expectedA = (q.get('expectedA') || '').trim() || '93.184.216.34';
+    const expectedC = (q.get('expectedC') || '').trim() || 'example.com';
+    const cnameHost = (q.get('cnameHost') || '').trim() || 'www';
 
-    /* Populate static fields */
-    document.getElementById('domain').textContent = domain;
-    document.getElementById('expA').textContent   = expectedA;
-    document.getElementById('expC').textContent   = expectedC;
-    document.getElementById('cnameHostCell').textContent = cnameHost;
-    document.getElementById('actCnameHost').textContent  = cnameHost;
+    /* Fill static fields */
+    domain      && (document.getElementById('domain').textContent = domain);
+    expectedA   && (document.getElementById('expA').textContent = expectedA);
+    expectedC   && (document.getElementById('expC').textContent = expectedC);
+    cnameHost   && (document.getElementById('cnameHostCell').textContent = cnameHost,
+                    document.getElementById('actCnameHost').textContent = cnameHost);
 
-    /* ---------------- DNS over HTTPS (Cloudflare) ---------------- */
+    /* --------- DNS over HTTPS (Cloudflare) --------- */
     async function doh(name, type) {
       const url = `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(name)}&type=${type}`;
-      const res = await fetch(url, { headers: { 'accept': 'application/dns-json' } });
+      const res = await fetch(url, { headers: { accept: 'application/dns-json' } });
       if (!res.ok) return [];
       const data = await res.json();
       return (data.Answer || []).map(a => a.data);
     }
 
-    (async function run() {
+    async function run() {
       const statusEl = document.getElementById('status');
       try {
-        // A record for apex
+        // A
         const aAns = await doh(domain, 'A');
         const liveA = aAns.find(v => /^\d+\.\d+\.\d+\.\d+$/.test(v)) || 'N/A';
         document.getElementById('actA').textContent = liveA;
 
-        // CNAME for host.domain
+        // CNAME
         const cAns = await doh(`${cnameHost}.${domain}`, 'CNAME');
         const liveC = cAns.length ? cAns[0].replace(/\.$/, '').toLowerCase() : 'N/A';
         document.getElementById('actC').textContent = liveC;
 
-        // Compare (case-insensitive for CNAME)
         const ok = (liveA === expectedA) &&
                    (liveC !== 'N/A' && liveC === expectedC.toLowerCase());
-
-        statusEl.textContent = ok ? "Your DNS Records are correct" : "Your DNS Records are NOT correct";
+        statusEl.textContent = ok ? 'Your DNS Records are correct'
+                                  : 'Your DNS Records are NOT correct';
         statusEl.className = 'status ' + (ok ? 'ok' : 'bad');
       } catch (e) {
-        statusEl.textContent = "Error checking DNS";
+        statusEl.textContent = 'Error checking DNS';
         statusEl.className = 'status bad';
       } finally {
-        // After content renders, scale to fit small viewports
-        requestAnimationFrame(scaleToFit);
+        // Size/scale after content renders
+        requestAnimationFrame(fit);
       }
-    })();
-
-    /* ---------------- Auto-scale table to fit iframe width ----------------
-       - Keeps table layout everywhere (no stacked mobile)
-       - Avoids horizontal scrolling in a narrow iframe
-       ------------------------------------------------------------------- */
-    function scaleToFit() {
-      const vp   = document.querySelector('.dns-viewport');
-      const root = document.querySelector('.dns-root');
-      const table = document.getElementById('dns-table');
-      if (!vp || !root || !table) return;
-
-      // Temporarily remove transform to measure natural width/height
-      const prev = root.style.transform;
-      root.style.transform = 'none';
-
-      // Natural (desktop) width of the table block
-      const naturalWidth = table.scrollWidth;         // e.g., ~980
-      const viewportWidth = vp.clientWidth || window.innerWidth;
-
-      // Scale down only if needed
-      const scale = Math.min(1, viewportWidth / naturalWidth);
-
-      root.style.transform = `scale(${scale})`;
-
-      // Update viewport height so the iframe shows the whole (scaled) content
-      const rect = root.getBoundingClientRect();
-      vp.style.height = rect.height + 'px';
-
-      // Restore transform var just in case (kept as is now)
-      // root.style.transform = prev;  // (not needed)
     }
 
-    // Recompute on resize/orientation changes
-    window.addEventListener('resize', () => { requestAnimationFrame(scaleToFit); });
+    /* --------- Robust scale-to-fit (no horizontal scroll) --------- */
+    function fit() {
+      const vp   = document.getElementById('vp');
+      const root = document.getElementById('root');
+      const table = document.getElementById('dnsTable');
+      if (!vp || !root || !table) return;
+
+      // Temporarily ensure no transform to read NATURAL size
+      const prevTransform = root.style.transform;
+      root.style.transform = 'none';
+
+      // Natural (unscaled) width & height
+      const naturalW = table.scrollWidth;      // e.g. ~980
+      const naturalH = root.scrollHeight;      // full content height
+
+      // Viewport width inside the iframe
+      const vw = Math.max(1, vp.clientWidth || window.innerWidth || 1);
+
+      // Scale down only if needed
+      const scale = Math.min(1, vw / naturalW);
+
+      // Apply scale
+      root.style.transform = `scale(${scale})`;
+
+      // Set wrapper height so the whole scaled content is visible (no cut-off)
+      vp.style.height = (naturalH * scale) + 'px';
+
+      // Keep transform value
+      // (no need to restore prevTransform)
+    }
+
+    window.addEventListener('load', run);
+    window.addEventListener('resize', () => requestAnimationFrame(fit));
   </script>
 </body>
 </html>
