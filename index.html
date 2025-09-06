@@ -1,148 +1,159 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>DNS Record Checker</title>
-  <style>
-    html, body { margin:0; padding:0; background:#fff; font-family:Arial, sans-serif; }
-
-    .viewport { width:100%; overflow-x:auto; }
-
-    h2 { margin:12px 0; font-size:18px; font-weight:700; text-align:center; }
-
-    /* Responsive table */
-    table { border-collapse:collapse; width:100%; table-layout:auto; }
-    th, td {
-      border:1px solid #000;
-      padding:6px;
-      text-align:center;
-      font-size:13px;
-      word-break:break-word; /* wrap long hostnames */
-    }
-    thead th { background:#eee; font-weight:700; }
-
-    /* Status strip */
-    .status { margin-top:10px; padding:10px; text-align:center; color:#fff; font-weight:700; font-size:14px; }
-    .ok  { background:#00a651; }
-    .bad { background:#d50000; }
-
-    /* Details of mismatches (red text) */
-    .details { margin-top:6px; text-align:center; font-size:13px; color:#d50000; }
-    .hide { display:none; }
-
-    /* Highlight actual values that are wrong */
-    .bad-text { color:#d50000; font-weight:700; }
-  </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>DNS Check → Redirect</title>
+<style>
+  html,body { margin:0; font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,Arial }
+  .wrap { max-width:720px; margin:12vh auto; padding:16px; text-align:center }
+  .spinner { width:36px; height:36px; border:4px solid #eee; border-top-color:#555; border-radius:50%; margin:16px auto; animation:spin 1s linear infinite }
+  @keyframes spin { to { transform:rotate(360deg) } }
+  .small { color:#666; font-size:12px; margin-top:8px }
+</style>
 </head>
 <body>
-  <div class="viewport">
-    <h2 id="domain">DNS Record Confirmation</h2>
+<div class="wrap">
+  <h2>Checking your DNS…</h2>
+  <div class="spinner" aria-hidden="true"></div>
+  <div id="msg" class="small">Please wait, redirecting to the form.</div>
+</div>
 
-    <table>
-      <thead>
-        <tr>
-          <th rowspan="2">DNS Record</th>
-          <th colspan="2">Expected</th>
-          <th colspan="2">Actual</th>
-        </tr>
-        <tr>
-          <th>Value</th><th>Data</th><th>Value</th><th>Data</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td>A</td>
-          <td>@</td>
-          <td id="expA"></td>
-          <td>@</td>
-          <td id="actA">—</td>
-        </tr>
-        <tr>
-          <td>CNAME</td>
-          <td id="cnameHostCell">www</td>
-          <td id="expC"></td>
-          <td id="actCnameHost">www</td>
-          <td id="actC">—</td>
-        </tr>
-      </tbody>
-    </table>
+<script>
+(async () => {
+  const qs = new URLSearchParams(location.search);
+  const debug = qs.get('debug') === '1';
+  const setMsg = t => { const el = document.getElementById('msg'); if (el) el.textContent = t; };
+  const canon = s => String(s || '').trim().replace(/\.$/, '').toLowerCase();
 
-    <div id="status" class="status">Checking DNS…</div>
-    <div id="details" class="details hide"></div>
-  </div>
+  // Inputs:
+  // - jotform: FULL JotForm URL encoded once with encodeURIComponent (may have its own params)
+  // - domain, expectedA (csv), expectedC, cnameHost (default 'www')
+  // (Optional) jotform64: base64 of full JotForm URL (fallback if you prefer base64)
+  let jotform = (qs.get('jotform') || '').trim();
+  const jotform64 = qs.get('jotform64');
+  const domain = (qs.get('domain') || '').trim();
+  const expectedA = (qs.get('expectedA') || '').split(',').map(s => s.trim()).filter(Boolean);
+  const expectedC = (qs.get('expectedC') || '').trim();
+  const cnameHost = (qs.get('cnameHost') || 'www').trim() || 'www';
 
-  <script>
-    /* --- URL parameters --- */
-    const q = new URLSearchParams(location.search);
-    const domain    = (q.get('domain')    || '').trim() || 'example.com';
-    const expectedA = (q.get('expectedA') || '').trim() || '93.184.216.34';
-    const expectedC = (q.get('expectedC') || '').trim() || 'example.com';
-    const cnameHost = (q.get('cnameHost') || '').trim() || 'www';
+  // Optional: support base64 if you ever need it
+  if (!jotform && jotform64) {
+    try {
+      jotform = decodeURIComponent(escape(atob(jotform64)));
+    } catch {
+      try { jotform = atob(jotform64); } catch { /* ignore */ }
+    }
+  }
 
-    document.getElementById('domain').textContent = domain;
-    document.getElementById('expA').textContent   = expectedA;
-    document.getElementById('expC').textContent   = expectedC;
-    document.getElementById('cnameHostCell').textContent = cnameHost;
-    document.getElementById('actCnameHost').textContent  = cnameHost;
+  if (!jotform) { setMsg('Missing ?jotform= (encoded full JotForm URL)'); return; }
+  if (!domain || (!expectedA.length && !expectedC)) { setMsg('Missing DNS params: need domain and expectedA and/or expectedC'); return; }
 
-    /* --- Cloudflare DNS-over-HTTPS --- */
-    async function doh(name, type) {
-      const url = `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(name)}&type=${type}`;
-      const res = await fetch(url, { headers:{ accept:'application/dns-json' } });
-      if (!res.ok) return [];
-      const data = await res.json();
-      return (data.Answer || []).map(a => a.data);
+  // DNS-over-HTTPS helper (Cloudflare → Google fallback)
+  async function doh(name, type) {
+    const urls = [
+      `https://cloudflare-dns.com/dns-query?ct=application/dns-json&name=${encodeURIComponent(name)}&type=${encodeURIComponent(type)}`,
+      `https://dns.google/resolve?name=${encodeURIComponent(name)}&type=${encodeURIComponent(type)}`
+    ];
+    let lastErr;
+    for (const url of urls) {
+      try {
+        const headers = url.includes('cloudflare-dns.com') ? { 'accept': 'application/dns-json' } : {};
+        const r = await fetch(url, { mode: 'cors', headers });
+        if (!r.ok) throw new Error(`HTTP ${r.status} from ${new URL(url).hostname}`);
+        const j = await r.json();
+        return (j.Answer || []).map(a => a.data);
+      } catch (e) { lastErr = e; }
+    }
+    throw lastErr || new Error('All DoH providers failed');
+  }
+
+  // Run the DNS check
+  let ok = false;
+  try {
+    const liveA = (await doh(domain, 'A')).filter(v => /^\d+\.\d+\.\d+\.\d+$/.test(v));
+    const fqdn = (cnameHost === '@' ? domain : `${cnameHost}.${domain}`);
+    let liveC = (await doh(fqdn, 'CNAME')).map(canon);
+
+    const aMatch = expectedA.length ? expectedA.every(ip => liveA.includes(ip)) : null;
+    let cMatch = expectedC ? liveC.includes(canon(expectedC)) : null;
+
+    // OPTIONAL flattening tolerance: if no CNAME answer, consider host A vs expectedC A
+    if (expectedC && cMatch === false && liveC.length === 0) {
+      const hostA = (await doh(fqdn, 'A')).filter(v => /^\d+\.\d+\.\d+\.\d+$/.test(v));
+      const expectedCA = (await doh(expectedC, 'A')).filter(v => /^\d+\.\d+\.\d+\.\d+$/.test(v));
+      if (hostA.length && expectedCA.length) {
+        const flattenedOK = expectedCA.every(ip => hostA.includes(ip));
+        if (flattenedOK) cMatch = true;
+      }
     }
 
-    (async function run() {
-      const statusEl  = document.getElementById('status');
-      const detailsEl = document.getElementById('details');
-      const msgs = [];
+    const checks = [aMatch, cMatch].filter(v => v !== null);
+    ok = checks.length ? checks.every(Boolean) : false;
 
-      try {
-        // A record (apex)
-        const aAns = await doh(domain, 'A');
-        const liveA = aAns.find(v => /^\d+\.\d+\.\d+\.\d+$/.test(v)) || 'N/A';
-        document.getElementById('actA').textContent = liveA;
+    if (debug) console.log({ domain, expectedA, expectedC, cnameHost, liveA, liveC, aMatch, cMatch, ok });
+  } catch (e) {
+    ok = false;
+    if (debug) console.error('DoH error:', e);
+  }
 
-        // CNAME (host.domain)
-        const cAns = await doh(`${cnameHost}.${domain}`, 'CNAME');
-        const liveC = cAns.length ? cAns[0].replace(/\.$/,'').toLowerCase() : 'N/A';
-        document.getElementById('actC').textContent = liveC;
+  // Decode JotForm URL (jotform param is expected to be encoded once)
+  try { jotform = decodeURIComponent(jotform); } catch (_) { /* if already decoded, continue */ }
 
-        // Compare (CNAME case-insensitive)
-        const cnameOK = (liveC !== 'N/A') && (liveC === expectedC.toLowerCase());
-        const aOK     = (liveA === expectedA);
+  let target;
+  try { target = new URL(jotform); }
+  catch { setMsg('Invalid JotForm URL'); return; }
 
-        if (!aOK) {
-          document.getElementById('actA').classList.add('bad-text');
-          msgs.push(`A record mismatch: expected ${expectedA}, actual ${liveA}`);
-        }
-        if (!cnameOK) {
-          document.getElementById('actC').classList.add('bad-text');
-          msgs.push(`CNAME mismatch (${cnameHost}.${domain}): expected ${expectedC}, actual ${liveC}`);
-        }
+  // Append dnsvalid
+  target.searchParams.set('dnsvalid', ok ? 'yes' : 'no');
 
-        const ok = aOK && cnameOK;
-        statusEl.textContent = ok ? 'Your DNS Records are correct' : 'Your DNS Records are NOT correct';
-        statusEl.className = 'status ' + (ok ? 'ok' : 'bad');
+  // --- Ensure a complete, single-encoded dnscheckurl on the final JotForm URL ---
+  (function ensureDnsCheckUrl(){
+    // Try to reuse a stable token as cache-buster (rowid/cb) or fall back to timestamp
+    const existingRowId = target.searchParams.get('rowid') || target.searchParams.get('cb') || '';
+    const cb = existingRowId || String(Date.now());
 
-        if (msgs.length) {
-          detailsEl.innerHTML = msgs.map(m => m.replace(/&/g,'&amp;').replace(/</g,'&lt;')).join('<br>');
-          detailsEl.classList.remove('hide');
-        } else {
-          detailsEl.classList.add('hide');
-          detailsEl.textContent = '';
-        }
-      } catch (e) {
-        statusEl.textContent = 'Error checking DNS';
-        statusEl.className = 'status bad';
-        detailsEl.classList.add('hide');
-        detailsEl.textContent = '';
-      }
-    })();
-  </script>
+    // Build decoded checker URL from authoritative params we just used
+    let checker = `https://websmartzadmin.github.io/dnschecker?domain=${encodeURIComponent(domain)}`;
+    if (expectedA.length) checker += `&expectedA=${encodeURIComponent(expectedA.join(','))}`;
+    if (expectedC)        checker += `&expectedC=${encodeURIComponent(expectedC)}`;
+    checker += `&cnameHost=${encodeURIComponent(cnameHost)}&cb=${encodeURIComponent(cb)}`;
+
+    // Encode once for nesting
+    const checkerEnc = encodeURIComponent(checker);
+
+    // If caller supplied dnscheckurl, try to heal it; otherwise set the one we built
+    const supplied = target.searchParams.get('dnscheckurl');
+    if (!supplied) {
+      target.searchParams.set('dnscheckurl', checkerEnc);
+      return;
+    }
+
+    let healed = supplied;
+
+    // If double-encoded (e.g., %253A), decode once
+    if (/%25[0-9A-Fa-f]{2}/.test(supplied)) {
+      try { healed = decodeURIComponent(supplied); } catch(_) {}
+    }
+
+    // If, after healing, it still lacks key params (only has domain), replace with our full one
+    const hasAll = /(?:^|[?&])expectedA=|(?:^|[?&])expectedC=|(?:^|[?&])cnameHost=/.test(healed);
+    if (!hasAll) {
+      target.searchParams.set('dnscheckurl', checkerEnc);
+    } else {
+      // re-set the healed value (single-encoded if it was provided decoded)
+      // If the healed value is still decoded, encode it once for safety
+      const needsEncode = /https?:\/\//.test(healed);
+      target.searchParams.set('dnscheckurl', needsEncode ? encodeURIComponent(healed) : healed);
+    }
+  })();
+
+  setMsg(ok ? 'DNS valid — redirecting…' : 'DNS not valid — redirecting…');
+
+  // Go!
+  location.replace(target.toString());
+})();
+</script>
 </body>
 </html>
 
