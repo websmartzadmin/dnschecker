@@ -10,46 +10,64 @@
   body { font-family: Arial, Helvetica, sans-serif; color:#111; }
   * { box-sizing: border-box; }
 
-  .table-wrap { width:100%; margin:0; padding:0; overflow:hidden; }
+  /* Center content and cap width on large iframes */
+  .table-wrap {
+    width: 100%;
+    max-width: 960px;     /* tweak to 820/900 if you prefer */
+    margin: 0 auto;       /* centers inside iframe */
+    padding: 0 8px;       /* small breathing room */
+    overflow: hidden;
+  }
 
-  h2 { margin:0 0 12px; text-align:center; font-size:24px; line-height:1.2; word-break:break-word; }
+  h2 { margin: 0 0 12px; text-align: center; font-size: 24px; line-height: 1.2; word-break: break-word; }
 
-  table { width:100%; border-collapse:collapse; table-layout:auto; }
-  th, td { border:1px solid #000; padding:10px; text-align:center; vertical-align:middle; word-break:break-word; }
-  thead th { background:#f6f6f6; }
+  table { width: 100%; border-collapse: collapse; table-layout: auto; }
+  th, td { border: 1px solid #000; padding: 10px; text-align: center; vertical-align: middle; word-break: break-word; }
+  thead th { background: #f6f6f6; }
 
-  .status { margin:14px 0 0; padding:12px 14px; font-weight:700; color:#fff; text-align:center; border-radius:6px; width:100%; }
-  .ok  { background:#16a34a; }
-  .bad { background:#dc2626; }
+  .status { margin: 14px 0 0; padding: 12px 14px; font-weight: 700; color: #fff; text-align: center; border-radius: 6px; width: 100%; }
+  .ok  { background: #16a34a; }
+  .bad { background: #dc2626; }
 
-  .cell-ok  { color:#16a34a; font-weight:700; }
-  .cell-bad { color:#dc2626; font-weight:700; }
+  .cell-ok  { color: #16a34a; font-weight: 700; }
+  .cell-bad { color: #dc2626; font-weight: 700; }
 
-  .hint { margin:8px 0 0; color:#666; font-size:13px; }
+  .hint { margin: 8px 0 0; color: #666; font-size: 13px; }
 
-  @media (max-width:560px){
+  /* Stacked cards ONLY when the iframe is very narrow */
+  @media (max-width:480px){
     thead{display:none;}
     table, tbody, tr, td{display:block; width:100%;}
     tr{border:1px solid #000; border-radius:8px; margin:8px 0; overflow:hidden; background:#fff;}
     td{border:none; border-top:1px solid #000; text-align:left; padding:10px 12px; font-size:14px;}
     td:first-child{border-top:none; background:#f6f6f6; font-weight:700;}
-
     tr[data-rec] td:nth-child(2)::before{content:"Expected Value"; display:block; color:#666; font-size:12px; margin-bottom:2px;}
     tr[data-rec] td:nth-child(3)::before{content:"Expected Data";  display:block; color:#666; font-size:12px; margin-bottom:2px;}
     tr[data-rec] td:nth-child(4)::before{content:"Actual Value";   display:block; color:#666; font-size:12px; margin-bottom:2px;}
     tr[data-rec] td:nth-child(5)::before{content:"Actual Data";    display:block; color:#666; font-size:12px; margin-bottom:2px;}
-
     .status{font-size:15px; padding:10px; margin-top:10px;}
     .hint{font-size:12px;}
   }
 </style>
+
+<!-- Optional switch: add &desktop=1 to URL to force desktop table (no stacking) -->
+<script>
+  (function(){
+    const q = new URLSearchParams(location.search);
+    if (q.get('desktop') === '1') {
+      const s = document.createElement('style');
+      s.textContent = '@media (max-width:480px){ /* disabled by desktop=1 */ }';
+      document.head.appendChild(s);
+    }
+  })();
+</script>
 </head>
 <body>
 
-<div class="table-wrap" id="app">
+<div class="table-wrap">
   <h2 id="title"></h2>
 
-  <table>
+  <table aria-label="DNS record comparison">
     <thead>
       <tr>
         <th rowspan="2">DNS Record</th>
@@ -62,6 +80,7 @@
       </tr>
     </thead>
     <tbody>
+      <!-- A record -->
       <tr id="row-a" data-rec="A">
         <td>A</td>
         <td>@</td>
@@ -69,6 +88,7 @@
         <td>@</td>
         <td id="actA"></td>
       </tr>
+      <!-- CNAME -->
       <tr id="row-c" data-rec="CNAME">
         <td>CNAME</td>
         <td id="cnameVal"></td>
@@ -102,9 +122,8 @@
   $('actCVal').textContent  = cnameHost === '@' ? '@' : cnameHost;
 
   if (!domain || (!expectedA.length && !expectedC)) {
-    setBanner(false, 'Missing parameters.');
+    setBanner(false, 'Missing parameters. Provide domain, expectedA and/or expectedC.');
     $('hint').textContent = 'Example: ?domain=example.com&expectedA=93.184.216.34&expectedC=pages.host.com&cnameHost=www';
-    resizeFrame();
     return;
   }
 
@@ -151,14 +170,6 @@
   function markOK(...ids){ ids.forEach(id => { const el=$(id); if (el) el.classList.add('cell-ok'); }); }
   function markBAD(id){ const el=$(id); if (el) el.classList.add('cell-bad'); }
   function setBanner(ok,text){ const el=$('status'); el.className='status ' + (ok?'ok':'bad'); el.textContent=text; }
-
-  // Tell parent frame to resize after rendering
-  function resizeFrame(){
-    const h = document.getElementById('app').scrollHeight + 20;
-    parent.postMessage({ type:'resize', height:h }, '*');
-  }
-  setTimeout(resizeFrame, 300); // initial
-  setTimeout(resizeFrame, 1500); // after DNS fetch
 })();
 </script>
 </body>
