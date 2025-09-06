@@ -1,59 +1,40 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>DNS Record Checker</title>
+
   <style>
-    body {
-      margin: 0;
-      font-family: Arial, sans-serif;
-      background: #fff;
-    }
+    /* Page reset */
+    html, body { margin: 0; padding: 0; background: #fff; font-family: Arial, sans-serif; }
 
-    /* wrapper that matches viewport */
-    .dns-viewport {
-      width: 100%;
-      overflow: hidden;
-    }
+    /* Viewport wrapper that we’ll size to the scaled table’s height */
+    .dns-viewport { width: 100%; overflow: hidden; }
 
-    /* the fixed-width table */
-    .dns-root {
-      width: 980px;   /* natural table width */
-      margin: 0;
-      transform-origin: top left;
-    }
+    /* Root holds the fixed-width (desktop) table; we scale this on mobile */
+    .dns-root { margin: 0; transform-origin: top left; }
 
-    table {
-      border-collapse: collapse;
-      width: 100%;
-      font-size: 14px;
-    }
-    th, td {
-      border: 1px solid #000;
-      padding: 8px;
-      text-align: center;
-    }
-    th {
-      background: #eee;
-    }
+    /* Headline */
+    h2 { margin: 0 0 12px 0; font-size: 18px; font-weight: 700; }
 
-    /* status bar */
-    .status {
-      font-weight: bold;
-      color: #fff;
-      text-align: center;
-      padding: 10px;
-    }
-    .ok { background: #00a651; }
-    .bad { background: #d50000; }
+    /* Table styles (desktop layout) */
+    table { border-collapse: collapse; width: 980px; /* natural width, will be measured dynamically too */ }
+    th, td { border: 1px solid #000; padding: 8px; text-align: center; font-size: 14px; }
+    thead th { background: #eee; }
+
+    /* Status strip */
+    .status { margin-top: 12px; padding: 10px; text-align: center; color: #fff; font-weight: 700; }
+    .status.ok  { background: #00a651; }     /* green */
+    .status.bad { background: #d50000; }     /* red  */
   </style>
 </head>
 <body>
   <div class="dns-viewport">
     <div class="dns-root">
-      <h2 id="domain"></h2>
-      <table>
+      <h2 id="domain">DNS Record Confirmation</h2>
+
+      <table id="dns-table">
         <thead>
           <tr>
             <th rowspan="2">DNS Record</th>
@@ -61,7 +42,10 @@
             <th colspan="2">Actual</th>
           </tr>
           <tr>
-            <th>Value</th><th>Data</th><th>Value</th><th>Data</th>
+            <th>Value</th>
+            <th>Data</th>
+            <th>Value</th>
+            <th>Data</th>
           </tr>
         </thead>
         <tbody>
@@ -70,82 +54,113 @@
             <td>@</td>
             <td id="expA"></td>
             <td>@</td>
-            <td id="actA"></td>
+            <td id="actA">—</td>
           </tr>
           <tr>
             <td>CNAME</td>
-            <td id="cnameHost"></td>
+            <td id="cnameHostCell">www</td>
             <td id="expC"></td>
-            <td id="actCnameHost"></td>
-            <td id="actC"></td>
+            <td id="actCnameHost">www</td>
+            <td id="actC">—</td>
           </tr>
         </tbody>
       </table>
-      <div id="status" class="status"></div>
+
+      <div id="status" class="status">Checking DNS…</div>
     </div>
   </div>
 
   <script>
-    const params = new URLSearchParams(window.location.search);
-    const domain = params.get("domain") || "example.com";
-    const expectedA = params.get("expectedA") || "93.184.216.34";
-    const expectedC = params.get("expectedC") || "example.com";
-    const cnameHost = params.get("cnameHost") || "www";
+    /* ---------------- Params ---------------- */
+    const q = new URLSearchParams(location.search);
+    const domain     = (q.get('domain')     || '').trim() || 'example.com';
+    const expectedA  = (q.get('expectedA')  || '').trim() || '93.184.216.34';
+    const expectedC  = (q.get('expectedC')  || '').trim() || 'example.com';
+    const cnameHost  = (q.get('cnameHost')  || '').trim() || 'www';
+    const forceTable = q.get('desktop') === '1'; // optional flag if you ever need it
 
-    document.getElementById("domain").textContent = domain;
-    document.getElementById("expA").textContent = expectedA;
-    document.getElementById("expC").textContent = expectedC;
-    document.getElementById("cnameHost").textContent = cnameHost;
-    document.getElementById("actCnameHost").textContent = cnameHost;
+    /* Populate static fields */
+    document.getElementById('domain').textContent = domain;
+    document.getElementById('expA').textContent   = expectedA;
+    document.getElementById('expC').textContent   = expectedC;
+    document.getElementById('cnameHostCell').textContent = cnameHost;
+    document.getElementById('actCnameHost').textContent  = cnameHost;
 
+    /* ---------------- DNS over HTTPS (Cloudflare) ---------------- */
     async function doh(name, type) {
       const url = `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(name)}&type=${type}`;
-      const res = await fetch(url, { headers: { accept: "application/dns-json" } });
+      const res = await fetch(url, { headers: { 'accept': 'application/dns-json' } });
       if (!res.ok) return [];
       const data = await res.json();
       return (data.Answer || []).map(a => a.data);
     }
 
     (async function run() {
+      const statusEl = document.getElementById('status');
       try {
-        // A record
-        const aAns = await doh(domain, "A");
-        const liveA = aAns.find(v => /^\d+\.\d+\.\d+\.\d+$/.test(v)) || "N/A";
-        document.getElementById("actA").textContent = liveA;
+        // A record for apex
+        const aAns = await doh(domain, 'A');
+        const liveA = aAns.find(v => /^\d+\.\d+\.\d+\.\d+$/.test(v)) || 'N/A';
+        document.getElementById('actA').textContent = liveA;
 
-        // CNAME
-        const cAns = await doh(cnameHost + "." + domain, "CNAME");
-        const liveC = cAns.length ? cAns[0].replace(/\.$/,"").toLowerCase() : "N/A";
-        document.getElementById("actC").textContent = liveC;
+        // CNAME for host.domain
+        const cAns = await doh(`${cnameHost}.${domain}`, 'CNAME');
+        const liveC = cAns.length ? cAns[0].replace(/\.$/, '').toLowerCase() : 'N/A';
+        document.getElementById('actC').textContent = liveC;
 
-        // Compare
-        let ok = (liveA === expectedA) && (liveC === expectedC.toLowerCase());
-        const statusEl = document.getElementById("status");
+        // Compare (case-insensitive for CNAME)
+        const ok = (liveA === expectedA) &&
+                   (liveC !== 'N/A' && liveC === expectedC.toLowerCase());
+
         statusEl.textContent = ok ? "Your DNS Records are correct" : "Your DNS Records are NOT correct";
-        statusEl.className = "status " + (ok ? "ok" : "bad");
+        statusEl.className = 'status ' + (ok ? 'ok' : 'bad');
       } catch (e) {
-        document.getElementById("status").textContent = "Error checking DNS";
-        document.getElementById("status").className = "status bad";
+        statusEl.textContent = "Error checking DNS";
+        statusEl.className = 'status bad';
+      } finally {
+        // After content renders, scale to fit small viewports
+        requestAnimationFrame(scaleToFit);
       }
     })();
 
-    // Scale table to viewport on mobile
-    (function() {
-      const TABLE_W = 980; // must match .dns-root width
-      function fit() {
-        const vw = Math.min(window.innerWidth, document.documentElement.clientWidth || TABLE_W);
-        const scale = Math.min(1, vw / TABLE_W);
-        const root = document.querySelector('.dns-root');
-        const vp   = document.querySelector('.dns-viewport');
-        root.style.transform = `scale(${scale})`;
-        vp.style.height = root.getBoundingClientRect().height + "px";
-      }
-      window.addEventListener('load', fit);
-      window.addEventListener('resize', fit);
-    })();
+    /* ---------------- Auto-scale table to fit iframe width ----------------
+       - Keeps table layout everywhere (no stacked mobile)
+       - Avoids horizontal scrolling in a narrow iframe
+       ------------------------------------------------------------------- */
+    function scaleToFit() {
+      const vp   = document.querySelector('.dns-viewport');
+      const root = document.querySelector('.dns-root');
+      const table = document.getElementById('dns-table');
+      if (!vp || !root || !table) return;
+
+      // Temporarily remove transform to measure natural width/height
+      const prev = root.style.transform;
+      root.style.transform = 'none';
+
+      // Natural (desktop) width of the table block
+      const naturalWidth = table.scrollWidth;         // e.g., ~980
+      const viewportWidth = vp.clientWidth || window.innerWidth;
+
+      // Scale down only if needed
+      const scale = Math.min(1, viewportWidth / naturalWidth);
+
+      root.style.transform = `scale(${scale})`;
+
+      // Update viewport height so the iframe shows the whole (scaled) content
+      const rect = root.getBoundingClientRect();
+      vp.style.height = rect.height + 'px';
+
+      // Restore transform var just in case (kept as is now)
+      // root.style.transform = prev;  // (not needed)
+    }
+
+    // Recompute on resize/orientation changes
+    window.addEventListener('resize', () => { requestAnimationFrame(scaleToFit); });
   </script>
 </body>
 </html>
+
+
 
 
 
