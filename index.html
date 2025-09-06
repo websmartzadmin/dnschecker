@@ -10,7 +10,6 @@
   body { font-family: Arial, Helvetica, sans-serif; color:#111; }
   * { box-sizing: border-box; }
 
-  /* full width always */
   .table-wrap { width:100%; margin:0; padding:0; overflow:hidden; }
 
   h2 { margin:0 0 12px; text-align:center; font-size:24px; line-height:1.2; word-break:break-word; }
@@ -28,7 +27,6 @@
 
   .hint { margin:8px 0 0; color:#666; font-size:13px; }
 
-  /* Mobile stacked layout */
   @media (max-width:560px){
     thead{display:none;}
     table, tbody, tr, td{display:block; width:100%;}
@@ -48,7 +46,7 @@
 </head>
 <body>
 
-<div class="table-wrap">
+<div class="table-wrap" id="app">
   <h2 id="title"></h2>
 
   <table>
@@ -104,8 +102,9 @@
   $('actCVal').textContent  = cnameHost === '@' ? '@' : cnameHost;
 
   if (!domain || (!expectedA.length && !expectedC)) {
-    setBanner(false, 'Missing parameters. Provide domain, expectedA and/or expectedC.');
+    setBanner(false, 'Missing parameters.');
     $('hint').textContent = 'Example: ?domain=example.com&expectedA=93.184.216.34&expectedC=pages.host.com&cnameHost=www';
+    resizeFrame();
     return;
   }
 
@@ -152,7 +151,16 @@
   function markOK(...ids){ ids.forEach(id => { const el=$(id); if (el) el.classList.add('cell-ok'); }); }
   function markBAD(id){ const el=$(id); if (el) el.classList.add('cell-bad'); }
   function setBanner(ok,text){ const el=$('status'); el.className='status ' + (ok?'ok':'bad'); el.textContent=text; }
+
+  // Tell parent frame to resize after rendering
+  function resizeFrame(){
+    const h = document.getElementById('app').scrollHeight + 20;
+    parent.postMessage({ type:'resize', height:h }, '*');
+  }
+  setTimeout(resizeFrame, 300); // initial
+  setTimeout(resizeFrame, 1500); // after DNS fetch
 })();
 </script>
 </body>
 </html>
+
