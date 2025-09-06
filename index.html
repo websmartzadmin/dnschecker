@@ -5,78 +5,89 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>DNS Record Checker</title>
   <style>
-    /* Reset */
-    html, body { margin:0; padding:0; background:#fff; font-family:Arial, sans-serif; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #fff;
+      font-family: Arial, sans-serif;
+    }
 
-    /* ====== LAYOUT CHOICE ======
-       Default is SCROLL (no scaling). Pass ?fit=scale to try scaling.
-    */
-    .viewport { width:100%; }
-    /* SCROLL mode: allow horizontal scroll on narrow screens */
-    .viewport.scroll { overflow-x:auto; overflow-y:hidden; -webkit-overflow-scrolling:touch; }
-    /* SCALE mode: we scale the fixed-width content; wrapper must hide overflow */
-    .viewport.scale { overflow:hidden; }
+    .viewport { width: 100%; overflow-x: auto; }
 
-    /* Fixed-width desktop block (we always render table layout) */
-    .root { width:980px; margin:0; transform-origin:top left; } /* 980px = natural table width */
+    h2 { margin: 0 0 12px 0; font-size: 18px; font-weight: 700; text-align: center; }
 
-    h2 { margin:0 0 12px 0; font-size:18px; font-weight:700; }
+    /* Table flexes to width of iframe */
+    table {
+      border-collapse: collapse;
+      width: 100%;              /* use full width of iframe */
+      table-layout: auto;       /* let columns shrink/grow as needed */
+    }
 
-    table { border-collapse:collapse; width:980px; }
-    th, td { border:1px solid #000; padding:8px; text-align:center; font-size:14px; }
-    thead th { background:#eee; }
+    th, td {
+      border: 1px solid #000;
+      padding: 6px;
+      text-align: center;
+      font-size: 13px;
+      word-break: break-word;   /* prevent long hostnames from overflowing */
+    }
 
-    .status { margin-top:12px; padding:10px; text-align:center; color:#fff; font-weight:700; }
-    .ok  { background:#00a651; }
-    .bad { background:#d50000; }
+    thead th {
+      background: #eee;
+      font-weight: bold;
+    }
+
+    .status {
+      margin-top: 10px;
+      padding: 10px;
+      text-align: center;
+      color: #fff;
+      font-weight: 700;
+      font-size: 14px;
+    }
+    .ok  { background: #00a651; }
+    .bad { background: #d50000; }
   </style>
 </head>
 <body>
-  <div id="vp" class="viewport scroll">
-    <div id="root" class="root">
-      <h2 id="domain">DNS Record Confirmation</h2>
-
-      <table id="dnsTable">
-        <thead>
-          <tr>
-            <th rowspan="2">DNS Record</th>
-            <th colspan="2">Expected</th>
-            <th colspan="2">Actual</th>
-          </tr>
-          <tr>
-            <th>Value</th><th>Data</th><th>Value</th><th>Data</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>A</td>
-            <td>@</td>
-            <td id="expA"></td>
-            <td>@</td>
-            <td id="actA">—</td>
-          </tr>
-          <tr>
-            <td>CNAME</td>
-            <td id="cnameHostCell">www</td>
-            <td id="expC"></td>
-            <td id="actCnameHost">www</td>
-            <td id="actC">—</td>
-          </tr>
-        </tbody>
-      </table>
-
-      <div id="status" class="status">Checking DNS…</div>
-    </div>
+  <div class="viewport">
+    <h2 id="domain">DNS Record Confirmation</h2>
+    <table>
+      <thead>
+        <tr>
+          <th rowspan="2">DNS Record</th>
+          <th colspan="2">Expected</th>
+          <th colspan="2">Actual</th>
+        </tr>
+        <tr>
+          <th>Value</th><th>Data</th><th>Value</th><th>Data</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>A</td>
+          <td>@</td>
+          <td id="expA"></td>
+          <td>@</td>
+          <td id="actA">—</td>
+        </tr>
+        <tr>
+          <td>CNAME</td>
+          <td id="cnameHostCell">www</td>
+          <td id="expC"></td>
+          <td id="actCnameHost">www</td>
+          <td id="actC">—</td>
+        </tr>
+      </tbody>
+    </table>
+    <div id="status" class="status">Checking DNS…</div>
   </div>
 
   <script>
-    /* --- URL params --- */
     const q = new URLSearchParams(location.search);
     const domain    = (q.get('domain')    || '').trim() || 'example.com';
     const expectedA = (q.get('expectedA') || '').trim() || '93.184.216.34';
     const expectedC = (q.get('expectedC') || '').trim() || 'example.com';
     const cnameHost = (q.get('cnameHost') || '').trim() || 'www';
-    const fitMode   = (q.get('fit') || 'scroll').toLowerCase(); // 'scroll' (default) or 'scale'
 
     document.getElementById('domain').textContent = domain;
     document.getElementById('expA').textContent   = expectedA;
@@ -84,7 +95,6 @@
     document.getElementById('cnameHostCell').textContent = cnameHost;
     document.getElementById('actCnameHost').textContent  = cnameHost;
 
-    /* --- DNS-over-HTTPS via Cloudflare --- */
     async function doh(name, type) {
       const url = `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(name)}&type=${type}`;
       const res = await fetch(url, { headers: { accept:'application/dns-json' } });
@@ -93,63 +103,31 @@
       return (data.Answer || []).map(a => a.data);
     }
 
-    async function run() {
+    (async function run() {
       const statusEl = document.getElementById('status');
       try {
-        // A
         const aAns = await doh(domain, 'A');
         const liveA = aAns.find(v => /^\d+\.\d+\.\d+\.\d+$/.test(v)) || 'N/A';
         document.getElementById('actA').textContent = liveA;
 
-        // CNAME
         const cAns = await doh(`${cnameHost}.${domain}`, 'CNAME');
         const liveC = cAns.length ? cAns[0].replace(/\.$/, '').toLowerCase() : 'N/A';
         document.getElementById('actC').textContent = liveC;
 
         const ok = (liveA === expectedA) &&
                    (liveC !== 'N/A' && liveC === expectedC.toLowerCase());
-
         statusEl.textContent = ok ? 'Your DNS Records are correct'
                                   : 'Your DNS Records are NOT correct';
         statusEl.className = 'status ' + (ok ? 'ok' : 'bad');
       } catch (e) {
         statusEl.textContent = 'Error checking DNS';
         statusEl.className = 'status bad';
-      } finally {
-        requestAnimationFrame(fit); // size after content is in
       }
-    }
-
-    /* --- Fit logic: scroll (default) or scale (optional) --- */
-    function fit() {
-      const vp = document.getElementById('vp');
-      const root = document.getElementById('root');
-      const table = document.getElementById('dnsTable');
-      if (!vp || !root || !table) return;
-
-      if (fitMode === 'scale') {
-        // SCALE down only if needed, otherwise keep 1:1
-        vp.classList.remove('scroll'); vp.classList.add('scale');
-        root.style.transform = 'none';
-        const naturalW = table.scrollWidth;               // ~980
-        const naturalH = root.scrollHeight;               // full content height
-        const vw = Math.max(1, vp.clientWidth || window.innerWidth || 1);
-        const scale = Math.min(1, vw / naturalW);
-        root.style.transform = `scale(${scale})`;
-        vp.style.height = (naturalH * scale) + 'px';
-      } else {
-        // SCROLL: no scaling; allow horizontal scroll if needed
-        vp.classList.remove('scale'); vp.classList.add('scroll');
-        root.style.transform = 'none';
-        vp.style.height = root.scrollHeight + 'px';
-      }
-    }
-
-    window.addEventListener('load', run);
-    window.addEventListener('resize', () => requestAnimationFrame(fit));
+    })();
   </script>
 </body>
 </html>
+
 
 
 
