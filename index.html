@@ -2,75 +2,34 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>DNS Checker</title>
-
 <style>
-  html, body { background: transparent; margin: 0; padding: 0; }
-  body { font-family: Arial, Helvetica, sans-serif; color:#111; }
-  * { box-sizing: border-box; }
+  /* Remove outer whitespace & background */
+  html, body { margin:0; padding:0; background:transparent; font-family:Arial,Helvetica,sans-serif; }
 
-  /* Center content and cap width on large iframes */
-  .table-wrap {
-    width: 100%;
-    max-width: 960px;     /* tweak to 820/900 if you prefer */
-    margin: 0 auto;       /* centers inside iframe */
-    padding: 0 8px;       /* small breathing room */
-    overflow: hidden;
-  }
+  h2{margin:8px 0 10px; text-align:center}
+  table{width:100%; border-collapse:collapse; margin:0}
+  th,td{border:1px solid #000; padding:8px 10px; text-align:center; background:transparent}
+  thead th{background:#f6f6f6}
 
-  h2 { margin: 0 0 12px; text-align: center; font-size: 24px; line-height: 1.2; word-break: break-word; }
+  .status{margin:8px 0 0; padding:10px 12px; font-weight:700; color:#fff; text-align:center}
+  .ok{background:#16a34a}   /* green */
+  .bad{background:#dc2626}  /* red   */
 
-  table { width: 100%; border-collapse: collapse; table-layout: auto; }
-  th, td { border: 1px solid #000; padding: 10px; text-align: center; vertical-align: middle; word-break: break-word; }
-  thead th { background: #f6f6f6; }
-
-  .status { margin: 14px 0 0; padding: 12px 14px; font-weight: 700; color: #fff; text-align: center; border-radius: 6px; width: 100%; }
-  .ok  { background: #16a34a; }
-  .bad { background: #dc2626; }
-
-  .cell-ok  { color: #16a34a; font-weight: 700; }
-  .cell-bad { color: #dc2626; font-weight: 700; }
-
-  .hint { margin: 8px 0 0; color: #666; font-size: 13px; }
-
-  /* Stacked cards ONLY when the iframe is very narrow */
-  @media (max-width:480px){
-    thead{display:none;}
-    table, tbody, tr, td{display:block; width:100%;}
-    tr{border:1px solid #000; border-radius:8px; margin:8px 0; overflow:hidden; background:#fff;}
-    td{border:none; border-top:1px solid #000; text-align:left; padding:10px 12px; font-size:14px;}
-    td:first-child{border-top:none; background:#f6f6f6; font-weight:700;}
-    tr[data-rec] td:nth-child(2)::before{content:"Expected Value"; display:block; color:#666; font-size:12px; margin-bottom:2px;}
-    tr[data-rec] td:nth-child(3)::before{content:"Expected Data";  display:block; color:#666; font-size:12px; margin-bottom:2px;}
-    tr[data-rec] td:nth-child(4)::before{content:"Actual Value";   display:block; color:#666; font-size:12px; margin-bottom:2px;}
-    tr[data-rec] td:nth-child(5)::before{content:"Actual Data";    display:block; color:#666; font-size:12px; margin-bottom:2px;}
-    .status{font-size:15px; padding:10px; margin-top:10px;}
-    .hint{font-size:12px;}
-  }
+  .cell-ok{color:#16a34a; font-weight:700}
+  .cell-bad{color:#dc2626; font-weight:700}
+  .subtle{color:#666; font-size:13px; margin:6px 0 0; text-align:center}
+  .nowrap{white-space:nowrap}
 </style>
-
-<!-- Optional switch: add &desktop=1 to URL to force desktop table (no stacking) -->
-<script>
-  (function(){
-    const q = new URLSearchParams(location.search);
-    if (q.get('desktop') === '1') {
-      const s = document.createElement('style');
-      s.textContent = '@media (max-width:480px){ /* disabled by desktop=1 */ }';
-      document.head.appendChild(s);
-    }
-  })();
-</script>
 </head>
 <body>
+  <h2 id="title">—</h2>
 
-<div class="table-wrap">
-  <h2 id="title"></h2>
-
-  <table aria-label="DNS record comparison">
+  <table>
     <thead>
       <tr>
-        <th rowspan="2">DNS Record</th>
+        <th rowspan="2" class="nowrap">DNS Record</th>
         <th colspan="2">Expected</th>
         <th colspan="2">Actual</th>
       </tr>
@@ -80,98 +39,106 @@
       </tr>
     </thead>
     <tbody>
-      <!-- A record -->
-      <tr id="row-a" data-rec="A">
+      <!-- A -->
+      <tr id="row-a">
         <td>A</td>
         <td>@</td>
-        <td id="expA"></td>
+        <td id="expA">—</td>
         <td>@</td>
-        <td id="actA"></td>
+        <td id="actA">—</td>
       </tr>
       <!-- CNAME -->
-      <tr id="row-c" data-rec="CNAME">
+      <tr id="row-c">
         <td>CNAME</td>
-        <td id="cnameVal"></td>
-        <td id="expC"></td>
-        <td id="actCVal"></td>
-        <td id="actC"></td>
+        <td id="cnameVal">www</td>
+        <td id="expC">—</td>
+        <td id="actCVal">www</td>
+        <td id="actC">—</td>
       </tr>
     </tbody>
   </table>
 
   <div id="status" class="status">Checking…</div>
-  <div id="hint" class="hint"></div>
-</div>
+  <div id="hint" class="subtle"></div>
 
 <script>
 (async () => {
   const qs = new URLSearchParams(location.search);
-  const get = k => (qs.get(k) || '').trim();
+  const domain = (qs.get('domain') || '').trim();
+  const expectedA = (qs.get('expectedA') || '').split(',').map(s => s.trim()).filter(Boolean);
+  const expectedC = (qs.get('expectedC') || '').trim();
+  const cnameHost = (qs.get('cnameHost') || 'www').trim() || 'www';
+
   const $ = id => document.getElementById(id);
-  const canon = s => String(s||'').trim().replace(/\.$/,'').toLowerCase();
-
-  const domain    = get('domain');
-  const expectedA = get('expectedA').split(',').map(s=>s.trim()).filter(Boolean);
-  const expectedC = get('expectedC');
-  const cnameHost = get('cnameHost') || 'www';
-
-  $('title').textContent    = domain || '';
-  $('expA').textContent     = expectedA.join(', ');
-  $('expC').textContent     = expectedC || '';
+  $('title').textContent = domain || '—';
+  $('expA').textContent = expectedA.join(', ') || '—';
+  $('expC').textContent = expectedC || '—';
   $('cnameVal').textContent = cnameHost === '@' ? '@' : cnameHost;
-  $('actCVal').textContent  = cnameHost === '@' ? '@' : cnameHost;
+  $('actCVal').textContent = cnameHost === '@' ? '@' : cnameHost;
 
   if (!domain || (!expectedA.length && !expectedC)) {
-    setBanner(false, 'Missing parameters. Provide domain, expectedA and/or expectedC.');
-    $('hint').textContent = 'Example: ?domain=example.com&expectedA=93.184.216.34&expectedC=pages.host.com&cnameHost=www';
+    setBanner(false, "Missing parameters. Provide domain, expectedA and/or expectedC.");
+    $('hint').textContent = "Example: ?domain=example.com&expectedA=93.184.216.34&expectedC=pages.host.com&cnameHost=www";
     return;
   }
 
-  async function doh(name, type){
-    const cf = fetch(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(name)}&type=${type}`, {headers:{accept:'application/dns-json'}});
-    const gg = fetch(`https://dns.google/resolve?name=${encodeURIComponent(name)}&type=${type}`, {headers:{accept:'application/dns-json'}});
-    const to = new Promise((_,rej)=>setTimeout(()=>rej(new Error('DNS timeout')), 6000));
-    let res;
-    try { res = await Promise.race([cf,to]); } catch { res = await Promise.race([gg,to]); }
-    if (!res.ok) throw new Error(`DNS ${type} lookup failed (${res.status})`);
-    const j = await res.json();
+  // Cloudflare DNS-over-HTTPS
+  async function doh(name, type) {
+    const url = `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(name)}&type=${type}`;
+    const r = await fetch(url, { headers: { 'accept': 'application/dns-json' }});
+    if (!r.ok) throw new Error(`DNS ${type} lookup failed (${r.status})`);
+    const j = await r.json();
     return (j.Answer || []).map(a => a.data);
   }
+  const canon = s => String(s || '').trim().replace(/\.$/,'').toLowerCase();
 
   try {
-    const aAns  = await doh(domain, 'A');
+    // A (root)
+    const aAns = await doh(domain, 'A');
     const liveA = aAns.filter(v => /^\d+\.\d+\.\d+\.\d+$/.test(v));
-    $('actA').textContent = liveA.join(', ');
+    $('actA').textContent = liveA.join(', ') || '—';
 
-    const fqdn  = (cnameHost === '@') ? domain : `${cnameHost}.${domain}`;
-    const cAns  = await doh(fqdn, 'CNAME');
+    // CNAME (selected host)
+    const fqdn = cnameHost === '@' ? domain : `${cnameHost}.${domain}`;
+    const cAns = await doh(fqdn, 'CNAME');
     const liveC = cAns.map(canon);
-    $('actC').textContent = liveC.join(', ');
+    $('actC').textContent = liveC.join(', ') || '—';
 
+    // Compare logic
     const aMatch = expectedA.length ? expectedA.every(ip => liveA.includes(ip)) : null;
     const cMatch = expectedC ? liveC.includes(canon(expectedC)) : null;
 
-    if (aMatch !== null) { aMatch ? markOK('expA','actA') : markBAD('actA'); }
-    if (cMatch !== null) { cMatch ? markOK('expC','actC','actCVal') : markBAD('actC'); }
+    // Cell coloring
+    if (aMatch !== null) {
+      if (aMatch) { addOK('expA'); addOK('actA'); }
+      else        { addBAD('actA'); }
+    }
+    if (cMatch !== null) {
+      if (cMatch) { addOK('expC'); addOK('actC'); addOK('actCVal'); }
+      else        { addBAD('actC'); }
+    }
 
-    const overall = [aMatch,cMatch].filter(v=>v!==null).every(Boolean);
-    setBanner(overall, overall ? 'Your DNS Records are correct' : 'Your DNS Records are NOT correct');
+    const overall = [aMatch, cMatch].filter(v => v !== null).every(Boolean);
+    setBanner(overall, overall ? "Your DNS Records are correct" : "Your DNS Records are NOT correct");
 
-    const hints=[];
-    if (aMatch===false) hints.push(`A mismatch: expected ${expectedA.join(', ')} vs actual ${liveA.join(', ')||'—'}.`);
-    if (cMatch===false) hints.push(`CNAME mismatch on ${cnameHost==='@'?'root (@)':cnameHost}: expected ${expectedC} vs actual ${liveC.join(', ')||'—'}.`);
-    $('hint').textContent = hints.join(' ');
+    // Hints
+    const hints = [];
+    if (aMatch === false) hints.push(`A mismatch: expected ${expectedA.join(', ')} vs actual ${liveA.join(', ') || '—'}.`);
+    if (cMatch === false) hints.push(`CNAME mismatch on ${cnameHost === '@' ? 'root (@)' : cnameHost}: expected ${expectedC} vs actual ${liveC.join(', ') || '—'}.`);
+    $('hint').innerHTML = hints.join(' ');
 
   } catch (e) {
-    setBanner(false, 'Could not fetch DNS records');
-    $('hint').textContent = e.message || String(e);
+    setBanner(false, "Could not fetch DNS records");
+    $('hint').textContent = e.message;
   }
 
-  function markOK(...ids){ ids.forEach(id => { const el=$(id); if (el) el.classList.add('cell-ok'); }); }
-  function markBAD(id){ const el=$(id); if (el) el.classList.add('cell-bad'); }
-  function setBanner(ok,text){ const el=$('status'); el.className='status ' + (ok?'ok':'bad'); el.textContent=text; }
+  // Helpers
+  function addOK(id){ const el=$(id); el.classList.add('cell-ok'); }
+  function addBAD(id){ const el=$(id); el.classList.add('cell-bad'); }
+  function setBanner(ok, text){ const el=$('status'); el.className='status '+(ok?'ok':'bad'); el.textContent=text; }
 })();
 </script>
 </body>
 </html>
+
 
