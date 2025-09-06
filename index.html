@@ -1,79 +1,130 @@
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>DNS Record Checker</title>
-  <style>
-    html, body {
-      margin: 0;
-      padding: 0;
-      background: #fff;
-      font-family: Arial, sans-serif;
-    }
-    html, body { margin:0; padding:0; background:#fff; font-family:Arial, sans-serif; }
+<script>
+(async () => {
+  const qs = new URLSearchParams(location.search);
+  const debug = qs.get('debug') === '1';
 
-    .viewport {
-      width: 100%;
-      overflow-x: auto;   /* allow scroll if absolutely needed */
-    }
-    .viewport { width:100%; overflow-x:auto; }
+  const domain    = (qs.get('domain') || '').trim();
+  const expectedA = (qs.get('expectedA') || '').split(',').map(s => s.trim()).filter(Boolean);
+  const expectedC = (qs.get('expectedC') || '').trim();
+  const cnameHost = (qs.get('cnameHost') || 'www').trim() || 'www';
 
-    h2 {
-      margin: 0 0 12px 0;
-      font-size: 18px;
-      font-weight: 700;
-      text-align: center;
-    }
-    h2 { margin:12px 0; font-size:18px; font-weight:700; text-align:center; }
+  const $ = id => document.getElementById(id);
+  const canon = s => String(s || '').trim().replace(/\.$/, '').toLowerCase();
 
-    /* Responsive table */
-    table {
-      border-collapse: collapse;
-      width: 100%;            /* stretch to iframe width */
-      table-layout: auto;     /* let columns adjust */
+  $('title').textContent = domain || 'DNS Check';
+  $('expA').textContent = expectedA.join(', ') || '—';
+  $('expC').textContent = expectedC || '—';
+  $('cnameVal').textContent = cnameHost === '@' ? '@' : cnameHost;
+  $('actCVal').textContent  = cnameHost === '@' ? '@' : cnameHost;
+
+  function setBanner(ok, text) {
+    const b = $('banner');
+    b.className = 'status ' + (ok ? 'ok' : 'bad');
+    b.textContent = text;
+  }
+  function addOK(id){ const el=$(id); el.classList.remove('cell-bad'); el.classList.add('cell-ok'); }
+  function addBAD(id){ const el=$(id); el.classList.remove('cell-ok'); el.classList.add('cell-bad'); }
+
+  // DoH with CF → Google fallback
+  async function doh(name, type) {
+    const urls = [
+      `https://cloudflare-dns.com/dns-query?ct=application/dns-json&name=${encodeURIComponent(name)}&type=${encodeURIComponent(type)}`,
+      `https://dns.google/resolve?name=${encodeURIComponent(name)}&type=${encodeURIComponent(type)}`
+    ];
+    let lastErr;
+    for (const url of urls) {
+      try {
+        const headers = url.includes('cloudflare-dns.com') ? { 'accept':'application/dns-json' } : {};
+        const r = await fetch(url, { mode:'cors', headers });
+        if (!r.ok) throw new Error(`HTTP ${r.status} from ${new URL(url).hostname}`);
+        const j = await r.json();
+        if (debug) console.log({ provider:new URL(url).hostname, name, type, j });
+        return (j.Answer || []).map(a => a.data);
+      } catch (e) { lastErr = e; if (debug) console.warn('DoH failed →', e.message || e); }
+    }
+    throw lastErr || new Error('All DoH providers failed');
+  }
+
+  // Guard so a late non-critical error can't flip the banner to error
+  let comparisonDone = false;
+
+  // 1) Validate inputs early
+  if (!domain || (!expectedA.length && !expectedC)) {
+    setBanner(false, 'Missing parameters: domain and expectedA/expectedC');
+    $('hint').textContent = 'Example: ?domain=example.com&expectedA=93.184.216.34&expectedC=pages.host.com&cnameHost=www';
+    return;
+  }
+
+  try {
+    // 2) Fetch DNS (only this block can set error banner)
+    // A (root)
+    const liveA = (await doh(domain, 'A')).filter(v => /^\d+\.\d+\.\d+\.\d+$/.test(v));
+    $('actA').textContent = liveA.join(', ') || '—';
+
+    // CNAME host (or flattened A)
+    const fqdn = (cnameHost === '@' ? domain : `${cnameHost}.${domain}`);
+    let liveC = (await doh(fqdn, 'CNAME')).map(canon);
+    if (liveC.length === 0) {
+      const flattenedA = (await doh(fqdn, 'A')).filter(v => /^\d+\.\d+\.\d+\.\d+$/.test(v));
+      $('actC').textContent = flattenedA.length ? `${flattenedA.join(', ')} (A)` : '—';
+    } else {
+      $('actC').textContent = liveC.join(', ') || '—';
     }
 
-    table { border-collapse:collapse; width:100%; table-layout:auto; }
-    th, td {
-      border: 1px solid #000;
-      padding: 6px;
-      text-align: center;
-      font-size: 13px;
-      word-break: break-word; /* wrap long hostnames instead of widening */
-      border:1px solid #000;
-      padding:6px;
-      text-align:center;
-      font-size:13px;
-      word-break:break-word; /* wrap long hostnames */
-    }
-    thead th { background:#eee; font-weight:700; }
+    // 3) Compare + paint
+    const aMatch = expectedA.length ? expectedA.every(ip => liveA.includes(ip)) : null;
+    const cMatch = expectedC ? liveC.includes(canon(expectedC)) : null;
 
-    thead th {
-      background: #eee;
-      font-weight: bold;
-    }
-    /* Status strip */
-    .status { margin-top:10px; padding:10px; text-align:center; color:#fff; font-weight:700; font-size:14px; }
-    .ok  { background:#00a651; }
-    .bad { background:#d50000; }
+    if (aMatch !== null) { aMatch ? (addOK('expA'), addOK('actA')) : addBAD('actA'); }
+    if (cMatch !== null) { cMatch ? (addOK('expC'), addOK('actC')) : addBAD('actC'); }
 
-    .status {
-      margin-top: 10px;
-      padding: 10px;
-      text-align: center;
-      color: #fff;
-      font-weight: 700;
-      font-size: 14px;
-    }
-    .ok  { background: #00a651; }
-    .bad { background: #d50000; }
-    /* Details of mismatches (red text) */
-    .details { margin-top:6px; text-align:center; font-size:13px; color:#d50000; }
-    .hide { display:none; }
+    const checks = [aMatch, cMatch].filter(v => v !== null);
+    const ok = checks.length ? checks.every(Boolean) : false;
 
-    /* Highlight actual values that are wrong */
-    .bad-text { color:#d50000; font-weight:700; }
-  </style>
-</head>
-<body>
-  <div class="viewport">
+    setBanner(ok, ok ? "Your DNS Records are correct" : "Your DNS Records are NOT correct");
+
+    const hints = [];
+    if (aMatch === false) hints.push(`A mismatch: expected ${expectedA.join(', ')} vs actual ${liveA.join(', ') || '—'}.`);
+    if (cMatch === false) {
+      const actCtxt = $('actC').textContent || '—';
+      hints.push(`CNAME mismatch on ${cnameHost === '@' ? 'root (@)' : cnameHost}: expected ${expectedC} vs actual ${actCtxt}.`);
+      hints.push(`Note: some providers flatten CNAME to A; then CNAME appears empty and A shows instead.`);
+    }
+    $('hint').innerHTML = hints.join(' ');
+
+    comparisonDone = true;
+
+    // 4) Jotform widget plumbing (never throw)
+    if (window.JFCustomWidget) {
+      try {
+        JFCustomWidget.setValue(JSON.stringify({ ok, aMatch, cMatch, observedA: liveA, observedC: liveC, cnameHostUsed: cnameHost, domain }));
+        JFCustomWidget.subscribe('submit', function(){
+          JFCustomWidget.sendSubmit(!!ok, ok ? undefined : { error: "DNS check failed" });
+        });
+        if (JFCustomWidget.requestFrameResize) {
+          JFCustomWidget.requestFrameResize({ height: document.body.scrollHeight });
+        }
+      } catch (e) {
+        if (debug) console.warn('Widget plumbing error (ignored):', e);
+      }
+    }
+
+  } catch (e) {
+    // Only show the red banner if we *haven't* already completed successfully
+    if (!comparisonDone) {
+      setBanner(false, "Could not fetch DNS records");
+      $('hint').textContent = (e && e.message) ? e.message : String(e);
+    }
+    if (debug) console.error(e);
+    if (window.JFCustomWidget) {
+      try {
+        JFCustomWidget.setValue(JSON.stringify({ ok:false, error:'doh_failed', message: String(e && e.message || e) }));
+        JFCustomWidget.subscribe('submit', function(){ JFCustomWidget.sendSubmit(false, { error: "DNS lookup failed" }); });
+      } catch(_) {}
+    }
+  }
+})();
+</script>
     <h2 id="domain">DNS Record Confirmation</h2>
 
     <table>
