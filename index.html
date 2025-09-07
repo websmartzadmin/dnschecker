@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>DNS Record Checker</title>
+  <!-- Safe to include; it’s a no-op if not running inside a Jotform custom widget -->
+  <script src="https://js.jotform.com/JotFormCustomWidget.min.js"></script>
   <style>
     html, body { margin:0; padding:0; background:#fff; font-family:Arial, sans-serif; }
 
@@ -33,9 +35,6 @@
 
     /* Highlight actual values that are wrong */
     .bad-text { color:#d50000; font-weight:700; }
-
-    /* Helps iOS if iframe auto-resize is shy */
-    html, body { min-height:560px; }
   </style>
 </head>
 <body>
@@ -114,6 +113,14 @@
       throw lastErr || new Error('All DoH providers failed');
     }
 
+    function requestResize() {
+      // Resize to actual content height (no extra whitespace)
+      const h = document.documentElement.scrollHeight || document.body.scrollHeight || 0;
+      if (window.JFCustomWidget && JFCustomWidget.requestFrameResize) {
+        JFCustomWidget.requestFrameResize({ height: h });
+      }
+    }
+
     (async function run() {
       const statusEl  = document.getElementById('status');
       const detailsEl = document.getElementById('details');
@@ -162,10 +169,23 @@
           '<small>(iOS Safari may block third-party requests inside iframes.)</small><br>' +
           `<a href="${location.href}" target="_blank" rel="noopener">Open checker in a new tab</a>`;
         detailsEl.classList.remove('hide');
+      } finally {
+        // Ask Jotform to fit the frame to content height (prevents extra white space)
+        requestResize();
+
+        // Also adjust on font load/late layout changes
+        if ('ResizeObserver' in window) {
+          const ro = new ResizeObserver(() => requestResize());
+          ro.observe(document.body);
+        } else {
+          setTimeout(requestResize, 300);
+          window.addEventListener('load', requestResize);
+        }
       }
     })();
   </script>
 </body>
 </html>
+
 
 
